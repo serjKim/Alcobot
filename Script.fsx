@@ -5,16 +5,40 @@ open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Text.Json
 
+type Word = string
+type Repeat = int32
+type NextWords = Map<Word, Repeat>
 type Entry =
-    | Start of nextwords:Set<string>
-    | Word of nextwords:Set<string>
+    | Start of NextWords
+    | Word of NextWords
     | End
+
+[<RequireQualifiedAccess>]
+module NextWords =
+    let mostRepeatableWord (nw: NextWords) : Word option =
+        let most = nw |> Seq.sortByDescending (fun x -> x.Value) |> Seq.tryHead
+        match most with
+        | Some w -> Some w.Key
+        | None -> None
+
+    let randomWord (nw: NextWords) : Word option =
+        let most = nw |> Seq.map (fun p -> (Guid.NewGuid(), p.Key)) |> Seq.sortBy fst |> Seq.tryHead
+        match most with
+        | Some (_, w) -> Some w
+        | None -> None
+
+    let add (w: Word) (nw: NextWords) : NextWords =
+        let repeat =
+            match Map.tryFind w nw with
+            | Some r -> r
+            | None -> 0
+        Map.add w (repeat + 1) nw
 
 module Entry =
     let getNextWords = function
-        | Start ws -> ws
-        | Word ws -> ws
-        | End -> Set.empty
+        | Start nw -> nw
+        | Word nw -> nw
+        | End -> Map.empty
 
 module EntryParser =
     open Entry
@@ -42,26 +66,31 @@ module EntryParser =
             -> Word words
 
     let private createEntry w nextw prevEntry dict =
+        let addNextWord =
+            match nextw with
+            | Some nw -> NextWords.add nw
+            | None -> fun x -> x
         match Map.tryFind w dict with
         | Some e ->
             getNextWords e
-            |> Set.union nextw
+            |> addNextWord
             |> createEntry' prevEntry
         | None ->
-            nextw
+            Map.empty
+            |> addNextWord
             |> createEntry' prevEntry
 
     let private window1Parser tokens prevEntry dict =
         match tokens with
         // a b
         | (WordToken w)::nextw::tail ->
-            Some (w, createEntry w (Set([nextw])) prevEntry dict, nextw::tail)
+            Some (w, createEntry w (Some nextw) prevEntry dict, nextw::tail)
         // . a
         | (EndToken w)::nextw::tail ->
             Some (w, End, nextw::tail)
         // a $
         | (WordToken w)::tail ->
-            Some (w, createEntry w Set.empty prevEntry dict, tail)
+            Some (w, createEntry w None prevEntry dict, tail)
         // . $
         | (EndToken w)::tail ->
             Some (w, End, tail)
@@ -74,7 +103,7 @@ module EntryParser =
         // a b .
         | (WordToken w1)::(WordToken w2)::nextw::tail ->
             let w = $"{w1} {w2}"
-            Some (w, createEntry w (Set([nextw])) prevEntry dict, w2::nextw::tail)
+            Some (w, createEntry w (Some nextw) prevEntry dict, w2::nextw::tail)
         // a . b
         | (WordToken w1)::(EndToken w2)::nextw::tail ->
             Some (w1, End, w2::nextw::tail)
@@ -85,7 +114,7 @@ module EntryParser =
         // $ - eol
         | (WordToken w1)::(WordToken w2)::tail ->
             let w = $"{w1} {w2}"
-            Some (w, createEntry w Set.empty prevEntry dict, w2::tail)
+            Some (w, createEntry w None prevEntry dict, w2::tail)
         // a . $
         | (WordToken w1)::(EndToken w2)::tail ->
             Some (w1, End, w2::tail)
@@ -94,7 +123,7 @@ module EntryParser =
             Some (w, End, nextw::tail)
         // a $
         | (WordToken w)::tail ->
-            Some (w, createEntry w Set.empty prevEntry dict, tail)
+            Some (w, createEntry w None prevEntry dict, tail)
         // . $
         | (EndToken w)::tail ->
             Some (w, End, tail)
@@ -180,8 +209,7 @@ let genPhrase (dict: Map<string, Entry>) : string list =
             | Some entry ->
                 let randToken =
                     getNextWords entry
-                    |> Seq.toArray
-                    |> tryRandKey
+                    |> NextWords.randomWord
                 match randToken with
                 | None -> res @ [startToken]
                 | Some token -> gen (res @ [startToken]) token
