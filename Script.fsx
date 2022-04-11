@@ -207,22 +207,18 @@ module Phrase =
 
 let genPhrase (dict: Map<Window, Entry>) : Phrase =
     let random = Random()
-    let tryRandKey (keys: 'a[]) : 'a option =
+    let tryRandItem (keys: 'a[]) : 'a option =
         if Array.length keys > 0
         then Some (keys.[random.Next(0, keys.Length)])
         else None
     let inline findPairByWindow (win: Window) (dict: Map<Window, Entry>) =
-        let randomKey =
+        let randomPair =
             dict
             |> Seq.filter (fun e -> e.Key = win || ((Window.first e.Key) = (Window.first win)))
-            |> Seq.map (fun e -> e.Key)
             |> Seq.toArray
-            |> tryRandKey
-        match randomKey with
-        | Some key ->
-            match Map.tryFind key dict with
-            | Some entry -> Some (key, entry)
-            | None -> None
+            |> tryRandItem
+        match randomPair with
+        | Some pair -> Some (pair.Key, pair.Value)
         | None -> None
     let rec gen (result: Phrase) (win: Window): Phrase =
         match Window.toWord win with
@@ -248,7 +244,7 @@ let genPhrase (dict: Map<Window, Entry>) : Phrase =
             | Entry.Start _ -> Some p.Key
             | _ -> None)
         |> Seq.toArray
-        |> tryRandKey
+        |> tryRandItem
     match randStartKey with
     | None -> Phrase.empty
     | Some key -> gen Phrase.empty key
