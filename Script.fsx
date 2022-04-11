@@ -49,8 +49,7 @@ module Window =
         | Window1 x -> x
         | Window2 (f, _) -> f
 
-    let inline toWord win =
-        match win with
+    let toWord = function
         | Window1 x -> x
         | Window2 (f, s) -> $"{f} {s}"
 
@@ -118,31 +117,32 @@ module EntryParser =
         // a b c
         // a b .
         | (WordToken w1)::(WordToken w2)::nextw::tail ->
-            let w = $"{w1} {w2}"
+            let w = Window2 (w1, w2)
             Some (w, createEntry w (Some nextw) prevEntry dict, w2::nextw::tail)
         // a . b
         | (WordToken w1)::(EndToken w2)::nextw::tail ->
-            Some (w1, End, w2::nextw::tail)
+            Some (Window1 w1, End, w2::nextw::tail)
         // . b c
         | (EndToken w)::w2::nextw::tail ->
-            Some (w, End, w2::nextw::tail)
+            Some (Window1 w, End, w2::nextw::tail)
         // a b $
         // $ - eol
         | (WordToken w1)::(WordToken w2)::tail ->
-            let w = $"{w1} {w2}"
+            let w = Window2 (w1, w2)
             Some (w, createEntry w None prevEntry dict, w2::tail)
         // a . $
         | (WordToken w1)::(EndToken w2)::tail ->
-            Some (w1, End, w2::tail)
+            Some (Window1 w1, End, w2::tail)
         // . b $
         | (EndToken w)::nextw::tail ->
-            Some (w, End, nextw::tail)
+            Some (Window1 w, End, nextw::tail)
         // a $
         | (WordToken w)::tail ->
-            Some (w, createEntry w None prevEntry dict, tail)
+            let win = Window1 w
+            Some (win, createEntry win None prevEntry dict, tail)
         // . $
         | (EndToken w)::tail ->
-            Some (w, End, tail)
+            Some (Window1 w, End, tail)
         | _ ->
             None
 
@@ -158,7 +158,7 @@ module EntryParser =
         parse tokens None seed
 
     let parseEntries1 = parseEntries window1Parser
-    // let parseEntries2 = parseEntries window2Parser
+    let parseEntries2 = parseEntries window2Parser
 
     let parseTokens strs =
         strs
@@ -192,11 +192,20 @@ let getEntriesFromJson () =
                 |> parseTokens)
     tokens
 
-let dict = getEntriesFromJson () |> parseEntries1 Map.empty
+let dict = getEntriesFromJson () |> parseEntries2 Map.empty
 dict
 |> Map.iter (fun k v -> printfn "%A: %A" k v)
 
-let genPhrase (dict: Map<Window, Entry>) : string list =
+type Phrase = Phrase of Word list
+
+[<RequireQualifiedAccess>]
+module Phrase =
+    let empty = Phrase []
+    let add (w: Word) (Phrase ws) : Phrase = Phrase (ws @ [w])
+    let addFromWindow (win: Window) (p: Phrase) : Phrase = add (win |> Window.toWord) p
+    let toString (Phrase ws) = String.Join (" ", ws)
+
+let genPhrase (dict: Map<Window, Entry>) : Phrase =
     let random = Random()
     let tryRandKey (keys: 'a[]) : 'a option =
         if Array.length keys > 0
@@ -215,11 +224,10 @@ let genPhrase (dict: Map<Window, Entry>) : string list =
             | Some entry -> Some (key, entry)
             | None -> None
         | None -> None
-    let rec gen res win =
-        let w = Window.toWord win
-        match w with
+    let rec gen (result: Phrase) (win: Window): Phrase =
+        match Window.toWord win with
         | EndToken _ ->
-            res
+            result
         | _ ->
             match findPairByWindow win dict with
             | Some (key, entry) ->
@@ -227,12 +235,12 @@ let genPhrase (dict: Map<Window, Entry>) : string list =
                     entry
                     |> NextWords.ofEntry
                     |> NextWords.randomWord
-                let wkey = Window.toWord key
+                let updatedPhrase = Phrase.addFromWindow key result
                 match randWord with
-                | None -> res @ [wkey]
-                | Some token -> gen (res @ [wkey]) (Window.ofWord token)
+                | None -> updatedPhrase
+                | Some token -> gen updatedPhrase (Window.ofWord token)
             | None ->
-                res @ [w]
+                Phrase.addFromWindow win result
     let randStartKey =
         dict
         |> Seq.choose (fun p ->
@@ -242,7 +250,9 @@ let genPhrase (dict: Map<Window, Entry>) : string list =
         |> Seq.toArray
         |> tryRandKey
     match randStartKey with
-    | None -> []
-    | Some key -> gen [] key
+    | None -> Phrase.empty
+    | Some key -> gen Phrase.empty key
 
-String.Join (" ", genPhrase dict)
+dict
+|> genPhrase
+|> Phrase.toString
