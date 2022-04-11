@@ -6,7 +6,7 @@ open System.Collections.Generic
 open System.Text.Json
 
 type Word = string
-type Repeat = int32
+type Repeat = uint32
 type NextWords = Map<Word, Repeat>
 type Entry =
     | Start of NextWords
@@ -31,18 +31,15 @@ module NextWords =
         let repeat =
             match Map.tryFind w nw with
             | Some r -> r
-            | None -> 0
-        Map.add w (repeat + 1) nw
+            | None -> 0u
+        Map.add w (repeat + 1u) nw
 
-module Entry =
-    let getNextWords = function
+    let ofEntry = function
         | Start nw -> nw
         | Word nw -> nw
         | End -> Map.empty
 
 module EntryParser =
-    open Entry
-
     [<Literal>]
     let endWord = "."
 
@@ -72,7 +69,7 @@ module EntryParser =
             | None -> fun x -> x
         match Map.tryFind w dict with
         | Some e ->
-            getNextWords e
+            NextWords.ofEntry e
             |> addNextWord
             |> createEntry' prevEntry
         | None ->
@@ -150,7 +147,6 @@ module EntryParser =
         |> Seq.map(fun x -> x.ToLowerInvariant())
         |> Seq.toList
 
-open Entry
 open EntryParser
 
 let getEntriesFromTxt () =
@@ -208,7 +204,7 @@ let genPhrase (dict: Map<string, Entry>) : string list =
             match findEntry startToken dict with
             | Some entry ->
                 let randToken =
-                    getNextWords entry
+                    NextWords.ofEntry entry
                     |> NextWords.randomWord
                 match randToken with
                 | None -> res @ [startToken]
