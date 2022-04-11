@@ -12,6 +12,9 @@ type Entry =
     | Start of NextWords
     | Word of NextWords
     | End
+type Window =
+    | Window1 of firstComponent:Word
+    | Window2 of firstComponent:Word * secondComponent:Word
 
 [<RequireQualifiedAccess>]
 module NextWords =
@@ -38,6 +41,20 @@ module NextWords =
         | Start nw -> nw
         | Word nw -> nw
         | End -> Map.empty
+
+[<RequireQualifiedAccess>]
+module Window =
+    let inline first win =
+        match win with
+        | Window1 x -> x
+        | Window2 (f, _) -> f
+
+    let inline toWord win =
+        match win with
+        | Window1 x -> x
+        | Window2 (f, s) -> $"{f} {s}"
+
+    let ofWord (w: Word) = Window1 w
 
 module EntryParser =
     [<Literal>]
@@ -81,16 +98,18 @@ module EntryParser =
         match tokens with
         // a b
         | (WordToken w)::nextw::tail ->
-            Some (w, createEntry w (Some nextw) prevEntry dict, nextw::tail)
+            let win = Window1 w
+            Some (win, createEntry win (Some nextw) prevEntry dict, nextw::tail)
         // . a
         | (EndToken w)::nextw::tail ->
-            Some (w, End, nextw::tail)
+            Some (Window1 w, End, nextw::tail)
         // a $
         | (WordToken w)::tail ->
-            Some (w, createEntry w None prevEntry dict, tail)
+            let win = Window1 w
+            Some (win, createEntry win None prevEntry dict, tail)
         // . $
         | (EndToken w)::tail ->
-            Some (w, End, tail)
+            Some (Window1 w, End, tail)
         | _ ->
             None
 
@@ -127,7 +146,7 @@ module EntryParser =
         | _ ->
             None
 
-    let private parseEntries windowParser (seed: Map<string, Entry>) (tokens: string list): Map<string, Entry> =
+    let private parseEntries windowParser (seed: Map<Window, Entry>) (tokens: string list): Map<Window, Entry> =
         let rec parse tokens prevEntry dict =
             match windowParser tokens prevEntry dict with
             | None ->
@@ -139,7 +158,7 @@ module EntryParser =
         parse tokens None seed
 
     let parseEntries1 = parseEntries window1Parser
-    let parseEntries2 = parseEntries window2Parser
+    // let parseEntries2 = parseEntries window2Parser
 
     let parseTokens strs =
         strs
@@ -177,40 +196,43 @@ let dict = getEntriesFromJson () |> parseEntries1 Map.empty
 dict
 |> Map.iter (fun k v -> printfn "%A: %A" k v)
 
-let genPhrase (dict: Map<string, Entry>) : string list =
+let genPhrase (dict: Map<Window, Entry>) : string list =
     let random = Random()
-    let tryRandKey (keys: string[]) =
-        if keys.Length > 0
+    let tryRandKey (keys: 'a[]) : 'a option =
+        if Array.length keys > 0
         then Some (keys.[random.Next(0, keys.Length)])
         else None
-    let inline findEntry w (dict: Map<string, Entry>) =
+    let inline findPairByWindow (win: Window) (dict: Map<Window, Entry>) =
         let randomKey =
             dict
-            |> Seq.filter (fun e -> e.Key = w || e.Key.Split(' ').[0] = w)
+            |> Seq.filter (fun e -> e.Key = win || ((Window.first e.Key) = (Window.first win)))
             |> Seq.map (fun e -> e.Key)
             |> Seq.toArray
             |> tryRandKey
         match randomKey with
         | Some key ->
             match Map.tryFind key dict with
-            | Some entry -> Some entry
+            | Some entry -> Some (key, entry)
             | None -> None
         | None -> None
-    let rec gen res startToken =
-        match startToken with
+    let rec gen res win =
+        let w = Window.toWord win
+        match w with
         | EndToken _ ->
             res
         | _ ->
-            match findEntry startToken dict with
-            | Some entry ->
-                let randToken =
-                    NextWords.ofEntry entry
+            match findPairByWindow win dict with
+            | Some (key, entry) ->
+                let randWord =
+                    entry
+                    |> NextWords.ofEntry
                     |> NextWords.randomWord
-                match randToken with
-                | None -> res @ [startToken]
-                | Some token -> gen (res @ [startToken]) token
+                let wkey = Window.toWord key
+                match randWord with
+                | None -> res @ [wkey]
+                | Some token -> gen (res @ [wkey]) (Window.ofWord token)
             | None ->
-                res @ [startToken]
+                res @ [w]
     let randStartKey =
         dict
         |> Seq.choose (fun p ->
