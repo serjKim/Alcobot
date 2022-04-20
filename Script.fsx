@@ -1,9 +1,15 @@
+#r "nuget: Npgsql, 6.0.3"
+#r "nuget: Dapper, 2.0.123"
+#r "nuget: FSharp.Control.AsyncSeq, 3.2.1"
+
 open System
 open System.IO
+open System.Threading
 open System.Threading.Tasks
 open System.Text.RegularExpressions
 open System.Collections.Generic
 open System.Text.Json
+open FSharp.Control
 
 type Word = string
 type Repeat = uint32
@@ -15,6 +21,8 @@ type Entry =
 type Window =
     | Window1 of firstComponent:Word
     | Window2 of firstComponent:Word * secondComponent:Word
+type Entries = Map<Window, Entry>
+type Corpus = { CorpusId: int64; Name: string }
 
 [<RequireQualifiedAccess>]
 module NextWords =
@@ -53,7 +61,22 @@ module Window =
         | Window1 x -> x
         | Window2 (f, s) -> $"{f} {s}"
 
+    let toArray = function
+        | Window1 x -> [| x |]
+        | Window2 (f, s) -> [| f; s |]
+
     let ofWord (w: Word) = Window1 w
+
+[<RequireQualifiedAccess>]
+module Entry =
+    let inline create (prevEntry: Entry option) (words: NextWords) : Entry =
+        match prevEntry with
+        | Some (End)
+            -> Start words
+        | Some (Word _)
+        | Some (Start _)
+        | None
+            -> Word words
 
 module EntryParser =
     [<Literal>]
@@ -69,15 +92,6 @@ module EntryParser =
         then Some endWord
         else None
 
-    let inline private createEntry' prevEntry words =
-        match prevEntry with
-        | Some (End)
-            -> Start words
-        | Some (Word _)
-        | Some (Start _)
-        | None
-            -> Word words
-
     let private createEntry w nextw prevEntry dict =
         let addNextWord =
             match nextw with
@@ -87,11 +101,11 @@ module EntryParser =
         | Some e ->
             NextWords.ofEntry e
             |> addNextWord
-            |> createEntry' prevEntry
+            |> Entry.create prevEntry
         | None ->
             Map.empty
             |> addNextWord
-            |> createEntry' prevEntry
+            |> Entry.create prevEntry
 
     let private window1Parser tokens prevEntry dict =
         match tokens with
