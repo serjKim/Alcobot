@@ -69,11 +69,19 @@ module Window =
 
 [<RequireQualifiedAccess>]
 module Entry =
-    let inline create (prevEntry: Entry option) (words: NextWords) : Entry =
-        match prevEntry with
+    let inline create (existing: Entry option) (prev: Entry option) (words: NextWords) : Entry =
+        match prev with
         | Some (End)
             -> Start words
-        | Some (Word _)
+        | Some (Word _) ->
+            match existing with
+            | Some (Start _) ->
+                Start words
+            | Some (Word _)
+            | None ->
+                Word words
+            | Some End ->
+                End
         | Some (Start _)
         | None
             -> Word words
@@ -101,11 +109,11 @@ module EntryParser =
         | Some e ->
             NextWords.ofEntry e
             |> addNextWord
-            |> Entry.create prevEntry
+            |> Entry.create (Some e) prevEntry
         | None ->
             Map.empty
             |> addNextWord
-            |> Entry.create prevEntry
+            |> Entry.create None prevEntry
 
     let private window1Parser tokens prevEntry dict =
         match tokens with
